@@ -1,0 +1,8 @@
+metric,value
+raw_rows,43848
+clean_rows,43848
+null_values,0
+duplicate_rows,0
+negative_load_values,0
+missing_hourly_timestamps,0
+dropped_columns,is_lockdown
