@@ -1,0 +1,6 @@
+model,data_fraction,total_rows,train_time_sec,infer_time_sec,train_throughput_rows_sec,peak_mem_mb
+Hist_Gradient_Boosting,0.2,8736,5.0502,0.0128,1383.7,7.26
+Hist_Gradient_Boosting,0.4,17472,3.4935,0.0095,4000.9,11.81
+Hist_Gradient_Boosting,0.6,26208,3.2124,0.015,6526.7,14.93
+Hist_Gradient_Boosting,0.8,34944,3.9825,0.0225,7019.4,17.87
+Hist_Gradient_Boosting,1.0,43680,3.529,0.0221,9901.8,20.65

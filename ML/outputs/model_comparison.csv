@@ -1,0 +1,6 @@
+model,MAE,RMSE,MAPE_pct,train_time_sec,infer_time_sec,infer_rows_per_sec,peak_train_mem_mb
+Hist_Gradient_Boosting,2093.9187,2656.7027,2.8899,4.008,0.0233,375120.8,21.02
+Random_Forest,2098.8044,2739.3136,2.9392,1.9535,0.0284,307859.3,20.58
+MLP_Neural_Net,4887.8442,6464.8707,6.4945,5.7249,0.0039,2240632.0,14.93
+Ridge_Regression,5252.4216,6985.488,7.0111,0.0206,0.0021,4247168.1,12.55
+Naive_Persistence_24h,11858.315,17032.3692,15.9705,0.0,0.0001,125878980.6,0.0
