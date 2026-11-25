@@ -14,12 +14,12 @@ def extract_and_clean(path):
     df = pd.read_csv(path)
     raw_rows = len(df)
 
-    # 1. Quality checks
+    # Quality checks
     nulls = int(df.isna().sum().sum())
     dups = int(df.duplicated().sum())
     neg_loads = int((df["load_kw"] < 0).sum())
 
-    # 2. Clean & Transform
+    # Clean & Transform
     df["timestamp"] = pd.to_datetime(df["timestamp"])
     df = df.drop_duplicates(subset=["timestamp"]).sort_values("timestamp")
 
@@ -37,7 +37,7 @@ def extract_and_clean(path):
     df.loc[df["season_rainy"], "season"] = "rainy"
     df = df.drop(columns=["season_dry", "season_rainy", "season_harmattan"])
 
-    # 3. Save quality report
+    # Save quality report
     report = pd.DataFrame([
         {"metric": "raw_rows", "value": raw_rows},
         {"metric": "clean_rows", "value": len(df)},
