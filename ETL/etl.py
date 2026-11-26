@@ -1,43 +1,60 @@
+import io
 import os
-import pandas as pd
-import numpy as np
+import time
 from pathlib import Path
+import numpy as np
+import pandas as pd
+import psycopg2
 
 ETL_DIR = Path(__file__).resolve().parent
 CSV_PATH = ETL_DIR.parent / "ML" / "smartgrid_5yr_hourly_natural-selected.csv"
+OUTPUT_DIR = ETL_DIR / "outputs"
+OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "outputs")
-os.makedirs(OUTPUT_DIR, exist_ok=True)
+DB_CONFIG = {
+    "dbname": os.getenv("PGDATABASE", "smart_grid_db"),
+    "user": os.getenv("PGUSER", os.getenv("USER", "postgres")),
+    "password": os.getenv("PGPASSWORD", "MKM@172431"),
+    "host": os.getenv("PGHOST", "localhost"),
+    "port": int(os.getenv("PGPORT", 5432)),
+}
+
+NUM_METERS = 100
 
 
-def extract_and_clean(path):
+def extract_and_clean(path: Path):
     df = pd.read_csv(path)
     raw_rows = len(df)
 
-    # Quality checks
+    # 1. Quality checks
     nulls = int(df.isna().sum().sum())
     dups = int(df.duplicated().sum())
     neg_loads = int((df["load_kw"] < 0).sum())
 
-    # Clean & Transform
+    # 2. Clean & Transform
     df["timestamp"] = pd.to_datetime(df["timestamp"])
     df = df.drop_duplicates(subset=["timestamp"]).sort_values("timestamp")
+    df["date"] = df["timestamp"].dt.date
 
-    # Check for missing hourly gaps
     expected_hours = int((df["timestamp"].max() - df["timestamp"].min()).total_seconds() // 3600) + 1
     missing_hours = expected_hours - len(df)
 
-    # Drop zero-variance column
     if "is_lockdown" in df.columns:
         df = df.drop(columns=["is_lockdown"])
 
-    # Combine 3 season booleans into 1 text column
+    # Collapse season columns
     df["season"] = "harmattan"
     df.loc[df["season_dry"], "season"] = "dry"
     df.loc[df["season_rainy"], "season"] = "rainy"
     df = df.drop(columns=["season_dry", "season_rainy", "season_harmattan"])
 
-    # Save quality report
+    # Collapse holiday_type columns
+    df["holiday_type"] = "none"
+    df.loc[df["holiday_type_national"] == 1, "holiday_type"] = "national"
+    df.loc[df["holiday_type_religious"] == 1, "holiday_type"] = "religious"
+    df = df.drop(columns=["holiday_type_national", "holiday_type_religious"])
+
+    # 3. Save quality report
     report = pd.DataFrame([
         {"metric": "raw_rows", "value": raw_rows},
         {"metric": "clean_rows", "value": len(df)},
@@ -47,14 +64,29 @@ def extract_and_clean(path):
         {"metric": "missing_hourly_timestamps", "value": missing_hours},
         {"metric": "dropped_columns", "value": "is_lockdown"},
     ])
-    report_path = os.path.join(OUTPUT_DIR, "data_quality_report.csv")
-    report.to_csv(report_path, index=False)
-
+    report.to_csv(OUTPUT_DIR / "data_quality_report.csv", index=False)
     print(report.to_string(index=False))
-    print(f"\nSaved to {report_path}")
     return df
 
-def build_meters(num_meters=100, seed=42):
+
+def build_dim_date(df: pd.DataFrame):
+    # One row per day; daily average for temperature
+    return (
+        df.groupby("date", as_index=False)
+        .agg({
+            "weekday": "first",
+            "is_weekend": "first",
+            "month": "first",
+            "season": "first",
+            "temperature": "mean",
+            "is_rain_day": "max",
+            "holiday_type": "first",
+        })
+        .assign(temperature=lambda d: d["temperature"].round(2))
+    )
+
+
+def build_dim_meter(num_meters=100, seed=42):
     rng = np.random.default_rng(seed)
     n_res = int(num_meters * 0.60)
     n_com = int(num_meters * 0.25)
@@ -68,13 +100,94 @@ def build_meters(num_meters=100, seed=42):
     return pd.DataFrame({
         "meter_id": [f"MTR_{i+1:04d}" for i in range(num_meters)],
         "consumer_type": sectors,
-        "load_share": shares,
+        "load_share": np.round(shares, 6),
     })
 
-if __name__ == "__main__":
+
+def create_schema(conn):
+    with conn.cursor() as cur:
+        cur.execute("""
+            DROP TABLE IF EXISTS fact_load;
+            DROP TABLE IF EXISTS dim_date;
+            DROP TABLE IF EXISTS dim_meter;
+
+            CREATE TABLE dim_date (
+                date DATE PRIMARY KEY,
+                weekday SMALLINT NOT NULL,
+                is_weekend SMALLINT NOT NULL,
+                month SMALLINT NOT NULL,
+                season VARCHAR(20) NOT NULL,
+                temperature DOUBLE PRECISION NOT NULL,
+                is_rain_day SMALLINT NOT NULL,
+                holiday_type VARCHAR(20) NOT NULL
+            );
+
+            CREATE TABLE dim_meter (
+                meter_id VARCHAR(16) PRIMARY KEY,
+                consumer_type VARCHAR(20) NOT NULL,
+                load_share DOUBLE PRECISION NOT NULL
+            );
+
+            CREATE TABLE fact_load (
+                meter_id VARCHAR(16) REFERENCES dim_meter(meter_id),
+                timestamp TIMESTAMP NOT NULL,
+                date DATE REFERENCES dim_date(date),
+                hour SMALLINT NOT NULL,
+                load_kw DOUBLE PRECISION NOT NULL,
+                PRIMARY KEY (meter_id, timestamp)
+            );
+        """)
+    conn.commit()
+
+
+def copy_df(conn, df: pd.DataFrame, table_name: str):
+    buf = io.StringIO()
+    df.to_csv(buf, index=False, header=False)
+    buf.seek(0)
+    with conn.cursor() as cur:
+        cur.copy_expert(f"COPY {table_name} FROM STDIN WITH (FORMAT CSV)", buf)
+    conn.commit()
+
+
+def main():
+    t0 = time.perf_counter()
     clean_df = extract_and_clean(CSV_PATH)
-    meters_df = build_meters(100)
-    print("\n--- SMART METERS ---")
-    print(meters_df["consumer_type"].value_counts())
-    print(meters_df.head())
-    print(f"\nTotal rows when expanded: {len(clean_df) * len(meters_df):,}")
+    dim_date_df = build_dim_date(clean_df)
+    dim_meter_df = build_dim_meter(NUM_METERS)
+
+    conn = psycopg2.connect(**DB_CONFIG)
+    create_schema(conn)
+
+    # 1. Load dimensions
+    copy_df(conn, dim_date_df, "dim_date")
+    copy_df(conn, dim_meter_df, "dim_meter")
+    print(f"\nLoaded dim_date ({len(dim_date_df):,} rows) and dim_meter ({len(dim_meter_df):,} rows)")
+
+    # 2. Disaggregate and stream-load fact_load
+    rng = np.random.default_rng(42)
+    base_ts = clean_df["timestamp"].values
+    base_date = clean_df["date"].values
+    base_hour = clean_df["hour"].values
+    base_load = clean_df["load_kw"].values
+
+    total_rows = 0
+    for _, row in dim_meter_df.iterrows():
+        noise = rng.normal(1.0, 0.05, size=len(base_load))
+        meter_load = np.clip(base_load * row["load_share"] * noise, 0.0, None)
+        batch_df = pd.DataFrame({
+            "meter_id": row["meter_id"],
+            "timestamp": base_ts,
+            "date": base_date,
+            "hour": base_hour,
+            "load_kw": np.round(meter_load, 4),
+        })
+        copy_df(conn, batch_df, "fact_load")
+        total_rows += len(batch_df)
+
+    conn.close()
+    elapsed = time.perf_counter() - t0
+    print(f"Loaded fact_load ({total_rows:,} rows) in {elapsed:.2f}s ({total_rows / elapsed:,.0f} rows/sec)")
+
+
+if __name__ == "__main__":
+    main()
