@@ -1,0 +1,4 @@
+method,sample_rows,elapsed_sec,rows_per_sec,est_full_4.38M_sec,speedup_vs_insert
+Row-by-Row INSERT,43848,1.5758,27825,157.58,1.0x
+Batch INSERT (execute_values),43848,0.3782,115923,37.82,4.2x
+PostgreSQL COPY,43848,0.1164,376583,11.64,13.5x
