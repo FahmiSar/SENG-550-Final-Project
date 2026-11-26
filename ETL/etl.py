@@ -14,7 +14,7 @@ OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 DB_CONFIG = {
     "dbname": os.getenv("PGDATABASE", "smart_grid_db"),
     "user": os.getenv("PGUSER", os.getenv("USER", "postgres")),
-    "password": os.getenv("PGPASSWORD", "MKM@172431"),
+    "password": os.getenv("PGPASSWORD", ""),
     "host": os.getenv("PGHOST", "localhost"),
     "port": int(os.getenv("PGPORT", 5432)),
 }
