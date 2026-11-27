@@ -14,12 +14,90 @@ is a shout tbh). Otherwise I think it's just postgres and denormalisation?
 Just don't change the data, only change (if you think it is a good idea) how it is stored in the df.
 """
 
+
+import os
+from pathlib import Path
+
 import pandas as pd
+import psycopg2
+from dotenv import load_dotenv
 
-def data_loader_csv(path = r"ML\smartgrid_5yr_hourly_natural-selected.csv"):
-    df = pd.read_csv(path)
 
-    return df
+# --------------------------------------------------
+# Configuration
+# --------------------------------------------------
+
+PROJECT_DIR = Path(__file__).resolve().parent.parent
+
+load_dotenv(PROJECT_DIR / ".env", override=True)
+
+DB_CONFIG = {
+    "dbname": os.getenv("PGDATABASE", "smart_grid_db"),
+    "user": os.getenv("PGUSER", "postgres"),
+    "password": os.getenv("PGPASSWORD", ""),
+    "host": os.getenv("PGHOST", "localhost"),
+    "port": int(os.getenv("PGPORT", 5432)),
+}
+
+
+# --------------------------------------------------
+# PostgreSQL Data Loader
+# --------------------------------------------------
+
+def data_loader_postgres(db_config=None):
+    """
+    Retrieves the denormalized materialized view from PostgreSQL
+    and converts it into a Pandas DataFrame.
+
+    Returns:
+        pd.DataFrame: Denormalized electricity consumption data.
+    """
+
+    if db_config is None:
+        db_config = DB_CONFIG
+
+    query = """
+        SELECT *
+        FROM mv_load_denorm
+        ORDER BY meter_id, timestamp;
+    """
+
+    conn = None
+
+    try:
+        conn = psycopg2.connect(**db_config)
+
+        df = pd.read_sql_query(query, conn)
+
+        # Normalize data types
+        df["timestamp"] = pd.to_datetime(df["timestamp"])
+        df["date"] = pd.to_datetime(df["date"])
+
+        # Normalize column names
+        df.columns = df.columns.str.strip().str.lower()
+
+        print("Successfully loaded denormalized PostgreSQL data.")
+        print(f"Rows loaded: {len(df):,}")
+        print(f"Columns loaded: {len(df.columns)}")
+
+        return df
+
+    finally:
+        if conn is not None:
+            conn.close()
+
+
+# --------------------------------------------------
+# Main
+# --------------------------------------------------
 
 if __name__ == "__main__":
-    print(data_loader_csv())
+
+    df = data_loader_postgres()
+
+    print("\nFirst five rows:")
+    print(df.head())
+
+    print("\nDataset information:")
+    df.info()
+

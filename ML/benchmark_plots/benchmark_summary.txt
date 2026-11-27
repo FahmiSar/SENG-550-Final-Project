@@ -1,0 +1,13 @@
+MODEL COMPARISON SUMMARY
+========================================
+Best MAE: Random_Forest (0.0004)
+Fastest Training: Naive_Persistence_24h (0.0004 sec)
+Fastest Inference: Naive_Persistence_24h (13616879041.40 rows/sec)
+Lowest Memory: Naive_Persistence_24h (0.00 MB)
+
+SCALABILITY SUMMARY
+========================================
+Largest Dataset: 4,384,632 rows
+Final Training Time: 9.8242 sec
+Final Peak Memory: 1282.15 MB
+Final Training Throughput: 357047.50 rows/sec

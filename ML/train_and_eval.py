@@ -2,7 +2,7 @@ import os
 import numpy as np
 import pandas as pd
 
-from data_loader import data_loader_csv
+from data_loader import data_loader_postgres
 from models import SmartGridForecaster
 
 
@@ -90,7 +90,7 @@ def engineer_features(df, time_col, target_col):
 
 def main():
 
-    df = data_loader_csv()
+    df = data_loader_postgres()
     df.columns = [c.strip().lower().replace(" ", "_") for c in df.columns]
 
     time_col, target_col = detect_columns(df)
