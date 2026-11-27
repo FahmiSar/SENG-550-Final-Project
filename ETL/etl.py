@@ -8,6 +8,7 @@ import psycopg2
 
 ETL_DIR = Path(__file__).resolve().parent
 CSV_PATH = ETL_DIR.parent / "ML" / "smartgrid_5yr_hourly_natural-selected.csv"
+SQL_DIR = ETL_DIR.parent / "SQL"
 OUTPUT_DIR = ETL_DIR / "outputs"
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -107,6 +108,8 @@ def build_dim_meter(num_meters=100, seed=42):
 def create_schema(conn):
     with conn.cursor() as cur:
         cur.execute("""
+            DROP MATERIALIZED VIEW IF EXISTS mv_load_denorm;
+            DROP VIEW IF EXISTS v_load_denorm;
             DROP TABLE IF EXISTS fact_load;
             DROP TABLE IF EXISTS dim_date;
             DROP TABLE IF EXISTS dim_meter;
@@ -148,6 +151,10 @@ def copy_df(conn, df: pd.DataFrame, table_name: str):
         cur.copy_expert(f"COPY {table_name} FROM STDIN WITH (FORMAT CSV)", buf)
     conn.commit()
 
+def create_views(conn):
+    with conn.cursor() as cur:
+        cur.execute((SQL_DIR / "denormalize.sql").read_text())
+    conn.commit()
 
 def main():
     t0 = time.perf_counter()
@@ -184,9 +191,13 @@ def main():
         copy_df(conn, batch_df, "fact_load")
         total_rows += len(batch_df)
 
-    conn.close()
     elapsed = time.perf_counter() - t0
     print(f"Loaded fact_load ({total_rows:,} rows) in {elapsed:.2f}s ({total_rows / elapsed:,.0f} rows/sec)")
+
+    # 3. Build the denormalised views for the ML data loader
+    create_views(conn)
+    print("Built v_load_denorm and mv_load_denorm")
+    conn.close()
 
 
 if __name__ == "__main__":
